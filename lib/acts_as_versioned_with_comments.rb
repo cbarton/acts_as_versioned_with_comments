@@ -1,0 +1,3 @@
+module ActsAsVersionedWithComments
+  # Your code goes here...
+end
