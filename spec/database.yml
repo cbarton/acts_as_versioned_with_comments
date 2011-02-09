@@ -1,6 +1,6 @@
 mysql:
  adapter: mysql
  host: localhost
- username: 
- password: 
+ username: root
+ password: ilike2run
  database: acts_test

@@ -2,12 +2,6 @@ require 'spec_helper'
 
 describe ActiveRecord::Acts::Versioned do
 
-	MIGRATIONS = [CreatePosts, CreateLockedPosts]
-
-	before(:all) do
-		MIGRATIONS.each { |migration| migration.up }
-	end
-
 	it 'should make the correct versioned class' do
 		Post.versioned_class_name.should =="Version"
 		Post.versioned_class.should == Post::Version
@@ -103,7 +97,4 @@ describe ActiveRecord::Acts::Versioned do
 		end
 	end
 
-	after(:all) do
-		MIGRATIONS.each { |migration| migration.down }
-	end
 end
