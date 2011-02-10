@@ -17,7 +17,9 @@ require File.expand_path(File.dirname(__FILE__) + '/migrations.rb')
 RSpec.configure do |config|
 	config.mock_with :rspec
 	config.before(:all) { 
-		Post.create_versioned_table unless Post.versioned_class.table_exists?
-		LockedPost.create_versioned_table unless LockedPost.versioned_class.table_exists?
+		Post.drop_versioned_table if Post.versioned_class.table_exists?
+		Post.create_versioned_table
+		LockedPost.drop_versioned_table if LockedPost.versioned_class.table_exists?
+		LockedPost.create_versioned_table
 	}
 end
