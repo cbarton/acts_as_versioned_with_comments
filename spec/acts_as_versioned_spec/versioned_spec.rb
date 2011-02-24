@@ -13,34 +13,160 @@ describe ActiveRecord::Acts::Versioned do
 		SpecialLockedPost.track_altered_attributes.should be_true
 	end
 
-	it 'should track altered attributes' do
-		locked_post = LockedPost.create!(:title => "locked post")
-		locked_post.lock_version.should ==(1)
-		locked_post.versions.count.should ==(1)
+	describe 'without locking' do
 
-		locked_post.body = "locked body"
-		locked_post.save_version?.should be_false
-		locked_post.save
-		locked_post.lock_version.should ==(2)
-		locked_post.versions(true).size.should ==(1)
-		
-		locked_post.title = "updated locked post"
-		locked_post.save_version?.should be_true
-		locked_post.save
-		locked_post.lock_version.should ==(3)
-		locked_post.versions(true).size.should ==(1)
+		it 'should temporarily disble optimistic locking' do
+			enabled_without_locking = false
+			block_called = false
 
-		locked_post.title = "updated locked post again"
-		locked_post.save_version?.should be_true
-		locked_post.save
-		locked_post.lock_version.should ==(4)
-		locked_post.versions(true).size.should ==(2)
+			ActiveRecord::Base.lock_optimistically = true
+			LockedPost.without_locking do
+				enabled_without_locking = ActiveRecord::Base.lock_optimistically
+				block_called = true
+			end
+			enabled_with_locking = ActiveRecord::Base.lock_optimistically
+
+			block_called.should be_true
+			enabled_with_locking.should be_true
+			enabled_without_locking.should be_false
+		end
+
+		it 'should revert optimistic locking settings if block raises exception' do
+			lambda { LockedPost.without_locking { raise RuntimeError, "darn" } }.should raise_error(RuntimeError)			
+			ActiveRecord::Base.lock_optimistically.should be_true
+		end
+
 	end
 
-	it 'should be scoped' do
-		l = LockedPost.first
-		l.versions.where('title like ?', "%#{l.title}%").count.should ==(1)
-		l.versions.find_by_lock_version(l.lock_version).should == l.versions.latest
+	describe 'the versioning' do
+		it 'should track altered attributes' do
+			locked_post = LockedPost.create!(:title => "locked post")
+			locked_post.lock_version.should ==(1)
+			locked_post.versions.count.should ==(1)
+
+			locked_post.body = "locked body"
+			locked_post.save_version?.should be_false
+			locked_post.save
+			locked_post.lock_version.should ==(2)
+			locked_post.versions(true).size.should ==(1)
+			
+			locked_post.title = "updated locked post"
+			locked_post.save_version?.should be_true
+			locked_post.save
+			locked_post.lock_version.should ==(3)
+			locked_post.versions(true).size.should ==(1)
+	
+			locked_post.title = "updated locked post again"
+			locked_post.save_version?.should be_true
+			locked_post.save
+			locked_post.lock_version.should ==(4)
+			locked_post.versions(true).size.should ==(2)
+		end
+	
+		it 'should be scoped' do
+			l = LockedPost.first
+			l.versions.where('title like ?', "%#{l.title}%").count.should ==(1)
+			l.versions.find_by_lock_version(l.lock_version).should == l.versions.latest
+		end
+	
+		it 'should keep referential integrity' do
+			post = Post.create!(:title => "The Post to be")
+			Post.count.should ==(1)
+			Post::Version.count.should ==(1)
+			post.destroy
+			Post.count.should ==(0)
+			Post::Version.count.should ==(0)
+			
+			widget = Widget.create!(:name => "test widget")
+			Widget.count.should	==(1)
+			Widget.versioned_class.count.should ==(1)
+			widget.destroy
+			Widget.count.should	==(0)
+			Widget.versioned_class.count.should ==(1)
+		end
+		
+		it 'should keep parent records' do
+			post = Post.create!(:title => "The Post to be")
+			post_version = post.versions.last
+			post.should == post_version.original
+		end
+
+		context 'attrbutes' do
+			before do 
+				@landmark = Landmark.create!(:name => "Place", :lat => 34.5, :long => 12.6, :doesnt_trigger_version => "Dont matter")
+			end
+	
+			it 'should keep unaltered' do
+				@landmark.attributes = @landmark.attributes.except("id")
+				@landmark.changed?.should be_false
+			end	
+
+			it 'should keep unchanged strings' do
+				@landmark.attributes = @landmark.attributes.except("id").inject({}) { |params, (key,value)| params.update(key => value.to_s) }
+				@landmark.changed?.should be_false
+			end
+
+			it 'should create version if a listed column is changed' do
+				@landmark.name = "Washington"
+				@landmark.changed?.should be_true
+				@landmark.altered?.should be_true
+			end
+
+			it 'should create version if all listed columns is changed' do
+				@landmark.name, @landmark.long, @landmark.lat = "Washington", 1.2, 1.1
+				@landmark.changed?.should be_true
+				@landmark.altered?.should be_true
+			end
+		
+			it 'should not create version if unlisted column is changed' do
+				@landmark.doesnt_trigger_version = "This again?"
+				@landmark.changed?.should be_true
+				@landmark.altered?.should be_false
+			end
+		end
+
+		it 'should find the earliest version' do
+			post = Post.create!(:title => "The Post to be")
+			post.update_attribute(:title, "Next title")
+			post.update_attribute(:title, "Last title")
+			post.versions.earliest.version.should == 1
+		end
+
+		it 'should find the latest version' do
+			post = Post.create!(:title => "The Post to be")
+			post.update_attribute(:title, "Next title")
+			post.update_attribute(:title, "Last title")
+			post.versions.latest.version.should == 3
+		end
+	end
+
+	describe 'the associations' do
+		before do 
+			@mily = Author.create!(:name => "Mily Bettenson")
+			@sue = Author.create!(:name => "Sue Betty")
+			@post = Post.create!(:title => "Best post evar", :author => @sue, :revisor => @sue)
+			@post.update_attributes(:author => @mily, :revisor => @mily)
+		end
+
+		it 'should be kept' do 
+			@post.authors.should == [@mily, @sue]
+		end
+
+		it 'should work with custom through' do
+			@post.revisors.should == [@mily, @sue]
+		end
+
+		it 'should be reflected' do
+			assoc = Post.reflect_on_association(:versions)
+			opts = assoc.options
+			opts[:dependent].should == :delete_all
+
+			assoc = Widget.reflect_on_association(:versions)
+			opts = assoc.options
+			opts[:dependent].should == :nullify
+			opts[:order].should == 'version desc'
+			opts[:foreign_key].should == 'widget_id'
+		end
 	end
 
 	describe 'the actual model' do
@@ -236,6 +362,16 @@ describe ActiveRecord::Acts::Versioned do
 		it 'should not rollback to another version' do
 			@sti_post.revert_to!(@sti_post.versions.first.lock_version).should be_true
 			@sti_post.revert_to!(@sti_post.versions.first).should be_true
+		end
+	end
+
+	describe 'the actual model with sequencing and association options' do 
+		it 'should keep the sequence' do 
+			Widget.versioned_class.delete_all
+			Widget.versioned_class.sequence_name.should == "widgets_seq"
+			3.times { Widget.create!(:name => "new widget") }
+			Widget.count.should ==(3)
+			Widget.versioned_class.count.should ==(3)
 		end
 	end
 

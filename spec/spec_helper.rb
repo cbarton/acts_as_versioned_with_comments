@@ -3,7 +3,6 @@ require 'active_record'
 require 'rspec'
 
 require 'ruby-debug'
-Debugger.start
 
 require File.expand_path(File.dirname(__FILE__) + '../../lib/acts_as_versioned.rb')
 
@@ -12,14 +11,20 @@ ActiveRecord::Base.configurations = { :mysql => db['mysql'] }
 ActiveRecord::Base.establish_connection(ActiveRecord::Base.configurations[:mysql])
 
 require File.expand_path(File.dirname(__FILE__) + '/models.rb')
-require File.expand_path(File.dirname(__FILE__) + '/migrations.rb')
+require File.expand_path(File.dirname(__FILE__) + '/schema.rb')
+
+
 
 RSpec.configure do |config|
 	config.mock_with :rspec
 	config.before(:all) { 
-		Post.drop_versioned_table if Post.versioned_class.table_exists?
-		Post.create_versioned_table
-		LockedPost.drop_versioned_table if LockedPost.versioned_class.table_exists?
-		LockedPost.create_versioned_table
+		[Post, LockedPost, Widget, Landmark].each do |klass|
+			klass.create_versioned_table
+		end
+	}
+	config.after(:all) {
+		[Post, LockedPost, Widget, Landmark].each do |klass|
+			klass.drop_versioned_table if klass.versioned_class.table_exists?
+		end
 	}
 end
